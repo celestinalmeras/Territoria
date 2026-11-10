@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Territoria</title>
+<style>
+:root{--bg:#dfe9ee;--panel:#fffffff0;--fg:#13222d;--mut:#586d7c;--acc:#0b7fae;--water:#a9c7d8;--land:#c9cfb8;--line:#13222d22;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#08121a;--panel:#10202cf0;--fg:#e6eff5;--mut:#8aa3b4;--acc:#4cc9f0;--water:#0c2433;--land:#2d3a35;--line:#ffffff22}}
+:root[data-theme="dark"]{--bg:#08121a;--panel:#10202cf0;--fg:#e6eff5;--mut:#8aa3b4;--acc:#4cc9f0;--water:#0c2433;--land:#2d3a35;--line:#ffffff22}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 Georgia,"Iowan Old Style",serif;overflow:hidden;overscroll-behavior:none}
+#app{position:relative;height:100%}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
+.box{position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+#hud{left:10px;top:10px;display:flex;gap:14px;flex-wrap:wrap;max-width:calc(100% - 170px)}
+#hud span{color:var(--mut)}#hud b{color:var(--fg);font-size:16px;font-variant-numeric:tabular-nums}
+#lb{right:10px;top:10px;min-width:130px;font-size:12px;font-family:system-ui,sans-serif}
+#lb div{display:flex;justify-content:space-between;gap:10px}#lb .me{color:var(--acc);font-weight:700}
+#bar{left:50%;bottom:12px;transform:translateX(-50%);display:flex;gap:10px;align-items:center;width:max-content;max-width:calc(100% - 20px);font-family:system-ui,sans-serif}
+#bar input{width:min(34vw,220px);accent-color:var(--acc)}
+button{font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
+button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+#msg{left:50%;top:72px;transform:translateX(-50%);text-align:center;pointer-events:none;transition:opacity .3s;max-width:80%}
+#build{left:10px;bottom:68px;max-height:calc(100% - 150px);overflow-y:auto;display:flex;flex-direction:column;gap:5px;font-family:system-ui,sans-serif;font-size:12px;width:170px}
+#build button{text-align:left;display:flex;justify-content:space-between;gap:6px}
+#build label{display:block;margin-top:2px}
+#start{inset:0;margin:auto;width:max-content;height:max-content;max-width:90%;text-align:center;padding:20px 26px;font-family:system-ui,sans-serif;z-index:5}
+#end{inset:0;margin:auto;width:max-content;height:max-content;text-align:center;padding:22px 30px;display:none}
+#end h1{margin:0 0 6px;font-size:30px}
+</style></head><body>
+<div id="app">
+<canvas id="c"></canvas>
+<div class="box" id="hud"><div><span>Troupes</span> <b id="tr">0</b></div><div><span>Territoire</span> <b id="te">0%</b></div><div><span>Or</span> <b id="go">0</b></div><div><span>Habitants</span> <b id="po">0</b></div><div><span>En attaque</span> <b id="en">0</b></div></div>
+<div class="box" id="lb"></div>
+<div class="box" id="build"></div>
+<div class="box" id="start" style="display:none"></div>
+<div class="box" id="msg"></div>
+<div class="box" id="bar"><label for="pc">Attaque</label><input id="pc" type="range" min="5" max="100" value="30"><b id="pv">30%</b><button id="auto" title="Étend automatiquement ton territoire sur les terres libres">Auto</button><button id="pause">Pause</button><button id="spd">1×</button></div>
+<div class="box" id="end"><h1 id="et"></h1><p id="ep" style="color:var(--mut);margin:0 0 14px"></p><button id="again" class="on">Rejouer</button></div>
+</div>
+<script>
+const W=150,H=96,N=W*H,NB=24;
+const NAMES=["Aurora","Bastion","Cyrus","Dorian","Elio","Faucon","Garance","Hydra","Ivoire","Jasper","Kraken","Lynx","Mistral","Nova","Orion","Pixel","Quasar","Roc","Sirocco","Titan","Umbra","Vesper","Wyvern","Zéphyr"];
+const $=id=>document.getElementById(id),cv=$("c"),ctx=cv.getContext("2d");
+const off=document.createElement("canvas");off.width=W;off.height=H;
+const octx=off.getContext("2d"),img=octx.createImageData(W,H),D=img.data;
+let own,land,bld,sel=0,tax=.3,P,atk,state,paused=false,auto=false,T=0,speed=1,totalLand=0,frac=.3,timer,V={s:1,ox:0,oy:0},wc=[0,0,0],lc=[0,0,0],lab=[];
+
+function hsl(h,s,l){s/=100;l/=100;const k=n=>(n+h/30)%12,a=s*Math.min(l,1-l),f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));return[f(0)*255,f(8)*255,f(4)*255]}
+function hex(v){const c=document.createElement("canvas").getContext("2d");c.fillStyle=v;c.fillRect(0,0,1,1);return[...c.getImageData(0,0,1,1).data]}
+function theme(){const s=getComputedStyle(document.documentElement);wc=hex(s.getPropertyValue("--water").trim());lc=hex(s.getPropertyValue("--land").trim())}
+matchMedia("(prefers-color-scheme:dark)").addEventListener("change",theme);
+
+function layer(s){const cw=Math.ceil(W/s)+2,ch=Math.ceil(H/s)+2,a=Array.from({length:cw*ch},Math.random);
+ return(x,y)=>{const fx=x/s,fy=y/s,ix=fx|0,iy=fy|0,tx=fx-ix,ty=fy-iy,sx=tx*tx*(3-2*tx),sy=ty*ty*(3-2*ty),i=iy*cw+ix;
+ return(a[i]*(1-sx)+a[i+1]*sx)*(1-sy)+(a[i+cw]*(1-sx)+a[i+cw+1]*sx)*sy}}
+function genMap(){const l1=layer(24),l2=layer(11),l3=layer(5),v=new Float32Array(N);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){const dx=(x/W-.5)*2,dy=(y/H-.5)*2;v[y*W+x]=l1(x,y)*.55+l2(x,y)*.3+l3(x,y)*.15-.18*(dx*dx+dy*dy)}
+ const t=[...v].sort((a,b)=>a-b)[(N*.4)|0];land=new Uint8Array(N);totalLand=0;
+ for(let i=0;i<N;i++)if(v[i]>t){land[i]=1;totalLand++}}
+
+function setOwner(i,id){const o=own[i];if(o){P[o].cells--;if(bld[i]){P[o].b[bld[i]]-=1+bl[i];bld[i]=bl[i]=0}}own[i]=id;P[id].cells++;if(o&&P[o].cells<=0)kill(o)}
+function kill(o){const p=P[o];p.alive=false;p.troops=0;for(const a of atk)if(a.p===o)a.done=1;if(o===1)finish(false)}
+function spawn(p,cx,cy,r){let k=0;for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const x=cx+dx,y=cy+dy;if(x<0||y<0||x>=W||y>=H||dx*dx+dy*dy>r*r+1)continue;const i=y*W+x;if(land[i]&&!own[i]){own[i]=p.id;p.cells++;k++}}return k}
+function mk(id,name,bot,col){return P[id]={id,name,bot,col,troops:120,cells:0,alive:true,gold:70,pop:100,b:[0,0,0,0,0,0],tc:[0,0,0]}}
+
+function newGame(){own=new Uint8Array(N);bld=new Uint8Array(N);bl=new Uint8Array(N);ally.clear();war=false;sel=0;peace=bcd=0;P=[null];atk=[];T=0;paused=false;$("pause").textContent="Pause";$("end").style.display="none";genMap();state="pick";fit();state="menu";$("start").style.display="block"}
+function startGame(x,y){const me=mk(1,"Toi",false,hsl(192,90,55));me.troops=DIFF[dif].tr;spawn(me,x,y,3);const pts=[[x,y]];
+ for(let b=0;b<DIFF[dif].bots;b++){const p=mk(b+2,NAMES[b],true,hsl((b*137.5+40)%360,62,52));let ok=false;
+  for(let t=0;t<400&&!ok;t++){const bx=Math.random()*W|0,by=Math.random()*H|0,i=by*W+bx;
+   if(!land[i]||own[i]||pts.some(q=>Math.hypot(q[0]-bx,q[1]-by)<(t<300?13:6)))continue;pts.push([bx,by]);spawn(p,bx,by,2);ok=true}
+  if(!p.cells)p.alive=false}
+ state="play";say("Glisse pour te déplacer, molette ou pincement pour zoomer",5000)}
+function finish(win){state=win?"won":"lost";$("et").textContent=win?"Victoire":"Défaite";
+ $("ep").textContent=win?"Tu contrôles l’essentiel de la carte.":"Ton territoire a été conquis.";const s=Math.round(T/10);$("ep").textContent+=" "+DIFF[dif].n+" · "+Math.floor(s/60)+" min "+s%60+" s";if(win)rec(s);$("end").style.display="block"}
+
+function border(pid,t){const b=[];for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;if(!land[i]||own[i]!==t)continue;
+ if((x>0&&own[i-1]===pid)||(x<W-1&&own[i+1]===pid)||(y>0&&own[i-W]===pid)||(y<H-1&&own[i+W]===pid))b.push(i)}return b}
+function go(pid,t,f){const p=P[pid];if(!p||!p.alive||t===pid)return false;const amt=p.troops*f;if(amt<5||!border(pid,t).length)return false;
+ p.troops-=amt;const a=atk.find(a=>a.p===pid&&a.t===t&&!a.done);if(a)a.troops+=amt;else atk.push({p:pid,t,troops:amt});return true}
+function tw(i,t){if(!t)return 0;const x=i%W,y=(i/W)|0;let n=0;for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H){const j=Y*W+X;if(bld[j]===4&&own[j]===t)n++}}return Math.min(n,4)}
+function step(a){const p=P[a.p],d=a.t?P[a.t]:null,end=()=>{a.done=1;if(p.alive)p.troops+=a.troops};
+ if(!p.alive||(d&&!d.alive))return end();const b=border(a.p,a.t);if(!b.length)return end();
+ const dens=d?d.troops/Math.max(1,d.cells):0,cost=(d?1+dens*.9:1)/((1+Math.min(p.b[1],12)*.07)*(1+p.tc[0]*.08)),heal=d?Math.min(.6,d.b[2]*.07):0;let n=1+Math.floor(Math.sqrt(a.troops)/3);
+ while(n--&&b.length){const k=Math.random()*b.length|0,i=b[k],c=cost*(1+tw(i,a.t)*(.7+(d?d.tc[2]*.15:0)));if(a.troops<c)return end();b[k]=b[b.length-1];b.pop();
+  a.troops-=c;if(d)d.troops=Math.max(0,d.troops-dens*.5*(1-heal));setOwner(i,a.p);if(d)p.gold+=.4;if(d&&!d.alive)return end()}}
+const COST=[0,45,50,35,60,55],DIFF=[{n:"Facile",bots:12,eco:.8,ai:20,tr:200},{n:"Normal",bots:18,eco:1,ai:14,tr:120},{n:"Difficile",bots:24,eco:1.25,ai:10,tr:100},{n:"Extrême",bots:24,eco:1.6,ai:7,tr:80}];let peace=0,bcd=0,dif=1,war=false,bl,ally=new Set();
+function bestT(){try{return+localStorage.getItem("terr"+dif)||0}catch(e){return 0}}
+function rec(s){try{const b=bestT();if(!b||s<b){localStorage.setItem("terr"+dif,s);$("ep").textContent+=" · nouveau record !"}}catch(e){}}
+function upg(i){const m=P[1],k=bld[i],c=Math.round(price(m,k)*1.6);if(m.gold<c)return say("Amélioration : "+c+" or requis");m.gold-=c;bl[i]++;m.b[k]++;say(BN[k]+" niveau "+(bl[i]+1))}
+function info(x,y){const o=own[y*W+x];if(!o)return say("Terre libre");const p=P[o];say(p.name+" · "+Math.floor(p.troops)+" troupes · "+Math.floor(p.pop)+" hab. · bâtiments (caserne/hôpital/quartier/tour/marché) : "+p.b.slice(1).join("/")+(ally.has(o)?" · allié":""),5000)}
+function diplo(t){const m=P[1];if(!t||t===1)return say("Touche un adversaire");if(ally.has(t))return say("Déjà alliés");if(m.gold<100)return say("Or insuffisant (100)");m.gold-=100;const q=P[t];
+ if(Math.random()<Math.min(.85,.25+m.cells/Math.max(1,q.cells)*.3)){ally.add(t);say(q.name+" accepte l’alliance")}else say(q.name+" refuse l’alliance")}
+function techCost(p,k){return Math.round(90*(1+p.tc[k]*.9))}
+function bomb(p,x,y){if(p.gold<150)return say("Or insuffisant (150)");if(T<bcd)return say("Bombe en recharge");p.gold-=150;bcd=T+300;const hit=new Set();
+ for(let dy=-3;dy<=3;dy++)for(let dx=-3;dx<=3;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H||dx*dx+dy*dy>10)continue;const j=Y*W+X,o=own[j];if(!land[j]||!o||o===p.id)continue;
+  if(bld[j]){P[o].b[bld[j]]-=1+bl[j];bld[j]=bl[j]=0}own[j]=0;P[o].cells--;hit.add(o)}
+ for(const o of hit){if(P[o].cells<=0)kill(o);else P[o].troops*=.85}say(hit.size?"Impact : "+hit.size+" adversaire(s) touché(s)":"Impact sans victime")}
+function event(){const m=P[1];if(!m||!m.alive)return;const r=Math.random()*4|0;
+ if(r===0){const l=m.pop*(.25-Math.min(.15,m.b[2]*.03));m.pop-=l;say("Épidémie : −"+Math.floor(l)+" habitants (les hôpitaux limitent les dégâts)",4500)}
+ else if(r===1){m.gold+=60+m.cells*.5;say("Des marchands font un don en or",4000)}
+ else if(r===2){m.pop+=m.pop*.15;say("Bonne récolte : la population augmente",4000)}
+ else{m.troops+=m.cells*2;say("Des mercenaires rejoignent tes rangs",4000)}}
+function price(p,k){return Math.round(COST[k]*(1+p.b[k]*.18))}
+function place(p,k,i){const c=price(p,k);if(!p.alive||p.gold<c||own[i]!==p.id||bld[i]||!land[i])return false;p.gold-=c;bld[i]=k;p.b[k]++;return true}
+function botBuild(p){const k=[1,2,3,3,4,4,5,5][Math.random()*8|0];if(p.gold<price(p,k))return;for(let t=0;t<60;t++){const i=Math.random()*N|0;if(own[i]===p.id&&!bld[i]){place(p,k,i);return}}}
+function ai(p){botBuild(p);const mx=p.cells*30+300;if(p.troops<mx*.18+30)return;const c=new Set();
+ for(let i=0;i<N;i++){if(own[i]!==p.id)continue;const x=i%W;
+  if(x>0&&land[i-1]&&own[i-1]!==p.id)c.add(own[i-1]);if(x<W-1&&land[i+1]&&own[i+1]!==p.id)c.add(own[i+1]);
+  if(i>=W&&land[i-W]&&own[i-W]!==p.id)c.add(own[i-W]);if(i<N-W&&land[i+W]&&own[i+W]!==p.id)c.add(own[i+W])}
+ const foes=[...c].filter(x=>x&&P[x].alive).sort((a,b)=>P[a].troops/P[a].cells-P[b].troops/P[b].cells);let t=-1;
+ if(c.has(0)&&(!foes.length||Math.random()<.65))t=0;else if(foes.length&&p.troops>P[foes[0]].troops*.8)t=foes[0];
+ if(t===1&&(T<peace||ally.has(p.id)))t=c.has(0)?0:-1;if(t>=0)go(p.id,t,.25+Math.random()*.3)}
+
+function tick(){if(state!=="play"||paused)return;T++;const L=P.filter(p=>p&&p.alive);
+ for(const p of L){const bb=p.b,e=p.bot?DIFF[dif].eco:1,g=p.bot?e:war?.6:1,r=p.bot?e:war?1.4:1,t=p.bot?0.3:tax,mx=p.cells*30+300+bb[1]*400,pc=(p.cells*8+bb[3]*120)*(1+p.tc[1]*.12);
+  p.pop=Math.max(5,p.pop+(p.pop*.02*(1-t*.8)+1)*(1-p.pop/pc));p.gold+=(p.pop*.003*(.4+t*1.6)+p.cells*.004+bb[5]*.09)*g;
+  p.troops=Math.min(mx,p.troops+(p.cells*.012+p.pop*.004+p.troops*.004+bb[1]*.15+bb[2]*.25)*r*(1-p.troops/mx))}
+ for(const a of atk)if(!a.done)step(a);atk=atk.filter(a=>!a.done);if(T%450===0)event();
+ for(const p of L)if(p.bot&&p.alive&&(T+p.id*3)%DIFF[dif].ai===0)ai(p);
+ if(auto&&T%12===0&&P[1].alive)go(1,0,Math.min(frac,.25));
+ if(state==="play"&&(P[1].cells>=totalLand*.6||!P.some(p=>p&&p.bot&&p.alive)))finish(true)}
+function clock(){clearInterval(timer);timer=setInterval(tick,100/speed)}
+
+function hud(){const me=P[1];if(!me)return;$("tr").textContent=Math.floor(me.troops);$("te").textContent=(me.cells/totalLand*100).toFixed(1)+"%";
+ for(let k=1;k<6;k++){const e=$("bc"+k);e.textContent=me.b[k]+" · "+price(me,k)+" or";e.parentNode.classList.toggle("on",sel===k);e.parentNode.style.opacity=me.gold<price(me,k)?.55:1}
+ for(let k=0;k<3;k++){const e=$("tc"+k);e.textContent=me.tc[k]+"/5 · "+(me.tc[k]<5?techCost(me,k)+" or":"max");e.parentNode.style.opacity=me.tc[k]<5&&me.gold>=techCost(me,k)?1:.55}
+ $("bomb").classList.toggle("on",sel===6);$("dip").classList.toggle("on",sel===7);$("inf").classList.toggle("on",sel===8);$("wr").classList.toggle("on",war);
+ $("go").textContent=Math.floor(me.gold);$("po").textContent=Math.floor(me.pop)+"/"+Math.round((me.cells*8+me.b[3]*120)*(1+me.tc[1]*.12));
+ $("en").textContent=Math.floor(atk.filter(a=>a.p===1).reduce((s,a)=>s+a.troops,0));
+ const L=P.filter(p=>p&&p.alive).sort((a,b)=>b.cells-a.cells),r=L.indexOf(me),row=(p,i)=>`<div class="${p.id===1?"me":""}"><span>${i+1}. ${p.name}${ally.has(p.id)?" ✓":""}</span><span>${(p.cells/totalLand*100).toFixed(1)}%</span></div>`;
+ $("lb").innerHTML=L.slice(0,7).map(row).join("")+(r>6?"<div>…</div>"+row(me,r):"")}
+
+function render(){const sx=new Float32Array(NB+2),sy=new Float32Array(NB+2),c=new Float32Array(NB+2);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,o=own[i];let r,g,b;
+  if(!land[i]){[r,g,b]=wc}else if(!o){[r,g,b]=lc}else{[r,g,b]=P[o].col;sx[o]+=x;sy[o]+=y;c[o]++;
+   if((x<W-1&&land[i+1]&&own[i+1]!==o)||(y<H-1&&land[i+W]&&own[i+W]!==o)){r*=.68;g*=.68;b*=.68}}
+  const k=i*4;D[k]=r;D[k+1]=g;D[k+2]=b;D[k+3]=255}
+ octx.putImageData(img,0,0);const dpr=devicePixelRatio||1;
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,cv.width,cv.height);ctx.translate(V.ox,V.oy);ctx.scale(V.s,V.s);
+ ctx.imageSmoothingEnabled=false;ctx.drawImage(off,0,0);
+ for(let i=0;i<N;i++){const k=bld[i];if(!k)continue;const x=i%W,y=(i/W)|0;ctx.fillStyle=BC[k];ctx.fillRect(x+.1,y+.1,.8,.8);ctx.fillStyle="#fff";ctx.font=".8px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(BI[k],x+.5,y+.55);if(bl[i]){ctx.fillStyle="#ffd54a";ctx.fillRect(x+.15,y+.8,.2+bl[i]*.25,.12)}}ctx.textAlign="center";ctx.textBaseline="middle";ctx.lineJoin="round";
+ if(P)for(const p of P){if(!p||!p.alive||c[p.id]<35)continue;const fs=Math.max(1.6,Math.min(6,Math.sqrt(c[p.id])*.3));
+  ctx.font=`700 ${fs}px Georgia,serif`;ctx.lineWidth=fs*.22;ctx.strokeStyle="#000a";ctx.fillStyle="#fff";
+  const X=sx[p.id]/c[p.id]+.5,Y=sy[p.id]/c[p.id]+.5;ctx.strokeText(p.name,X,Y);ctx.fillText(p.name,X,Y)}
+ if(P&&P[1])hud();requestAnimationFrame(render)}
+
+function fit(){const w=innerWidth,h=innerHeight;V.s=Math.min(w/W,h/H)*.96;V.ox=(w-W*V.s)/2;V.oy=(h-H*V.s)/2}
+function size(){const d=devicePixelRatio||1;cv.width=innerWidth*d;cv.height=innerHeight*d}
+addEventListener("resize",()=>{size();fit()});
+function zoom(px,py,f){const r=cv.getBoundingClientRect(),x=px-r.left,y=py-r.top,s=Math.max(2,Math.min(40,V.s*f));f=s/V.s;V.ox=x-(x-V.ox)*f;V.oy=y-(y-V.oy)*f;V.s=s}
+cv.addEventListener("wheel",e=>{e.preventDefault();zoom(e.clientX,e.clientY,Math.exp(-e.deltaY*.0015))},{passive:false});
+const ptr=new Map();let moved=0,lastD=0;
+cv.addEventListener("pointerdown",e=>{cv.setPointerCapture(e.pointerId);ptr.set(e.pointerId,[e.clientX,e.clientY]);moved=0;lastD=0});
+cv.addEventListener("pointermove",e=>{if(!ptr.has(e.pointerId))return;const o=ptr.get(e.pointerId),n=[e.clientX,e.clientY];ptr.set(e.pointerId,n);
+ if(ptr.size===1){V.ox+=n[0]-o[0];V.oy+=n[1]-o[1];moved+=Math.abs(n[0]-o[0])+Math.abs(n[1]-o[1])}
+ else{const[a,b]=[...ptr.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]);if(lastD)zoom((a[0]+b[0])/2,(a[1]+b[1])/2,d/lastD);lastD=d;moved=99}});
+cv.addEventListener("pointerup",e=>{if(ptr.size===1&&moved<8)tap(e.clientX,e.clientY);ptr.delete(e.pointerId);lastD=0});
+cv.addEventListener("pointercancel",e=>ptr.delete(e.pointerId));
+function tap(px,py){const r=cv.getBoundingClientRect(),x=Math.floor((px-r.left-V.ox)/V.s),y=Math.floor((py-r.top-V.oy)/V.s);
+ if(x<0||y<0||x>=W||y>=H||!land[y*W+x])return;const t=own[y*W+x];
+ if(state==="pick"){if(!t)startGame(x,y);else say("Choisis une terre libre");return}
+ if(state!=="play"||paused)return;
+ if(sel===8){info(x,y);return}
+ if(sel===7){diplo(t);return}
+ if(sel===6){bomb(P[1],x,y);return}
+ if(sel){if(!(t===1&&place(P[1],sel,y*W+x)))say(t===1?"Or insuffisant ou case déjà occupée":"Construis sur ton territoire");return}
+ if(t===1&&bld[y*W+x]&&bl[y*W+x]<2){upg(y*W+x);return}
+ if(t===1){let s=0;for(const a of atk)if(a.p===1){s+=a.troops;a.done=1}P[1].troops+=s;say(s?"Troupes rappelées":"Touche un voisin ou une terre libre pour attaquer");return}
+ if(t&&ally.has(t)){ally.delete(t);say(P[t].name+" n’est plus ton allié");return}
+ if(!go(1,t,frac))say(P[1].troops*frac<5?"Pas assez de troupes":"Aucune frontière commune avec cette cible")}
+
+let mt;function say(t,ms=2200){const m=$("msg");m.textContent=t;m.style.opacity=1;clearTimeout(mt);mt=setTimeout(()=>m.style.opacity=0,ms)}
+$("pc").oninput=e=>{frac=e.target.value/100;$("pv").textContent=e.target.value+"%"};
+$("auto").onclick=e=>{auto=!auto;e.target.classList.toggle("on",auto)};
+$("pause").onclick=e=>{paused=!paused;e.target.textContent=paused?"Reprendre":"Pause"};
+$("spd").onclick=e=>{speed=speed===1?2:speed===2?4:1;e.target.textContent=speed+"×";clock()};
+$("again").onclick=newGame;
+const BN=["","Caserne","Hôpital","Quartier","Tour"],BI=["","⚔","✚","⌂","♜"],BC=["","#c0392b","#27ae60","#c58f0a","#5b6b86"],
+BD=["","Caserne : conquêtes jusqu’à 12 × 7 % moins chères, +400 troupes max, +troupes.","Hôpital : −7 % de pertes quand on t’attaque, régénère des troupes.","Quartier : +120 habitants max, donc plus d’or et de recrues.","Tour : rend la conquête des cases dans un rayon de 2 plus coûteuse (+70 % par tour)."];
+BN.push("Marché");BI.push("¤");BC.push("#8e44ad");BD.push("Marché : produit de l’or en continu.");
+$("build").innerHTML=`<b>Gérer</b>`+[1,2,3,4,5].map(k=>`<button data-k="${k}"><span>${BI[k]} ${BN[k]}</span><span id="bc${k}"></span></button>`).join("")+`<small id="bd" style="color:var(--mut)"></small><label>Impôts <b id="txv">30%</b><input id="tx" type="range" min="0" max="100" value="30" style="width:100%"></label><small style="color:var(--mut)">Plus d’or, mais moins de croissance.</small><button id="rec">Recruter 25 % des habitants</button><b>Technologies</b>${["Armement","Agriculture","Fortification"].map((n,k)=>`<button data-t="${k}"><span>${n}</span><span id="tc${k}"></span></button>`).join("")}<small style="color:var(--mut)">Armement : conquêtes −8 % par niveau. Agriculture : +12 % d’habitants max. Fortification : tours +15 %.</small><b>Actions</b><button id="bomb">Bombe (150 or)</button><button id="peace">Paix 2 min (140 or)</button><button id="dip">Alliance (100 or)</button><button id="inf">Inspecter</button><button id="wr">Économie de guerre</button><small style="color:var(--mut)">Touche un de tes bâtiments (mode attaque) pour l’améliorer, jusqu’au niveau 3. Raccourcis : 1–5 bâtiments, B bombe, A alliance, I inspecter, P pause, Échap annuler.</small>`;
+document.querySelectorAll("#build [data-k]").forEach(b=>b.onclick=()=>{const k=+b.dataset.k;sel=sel===k?0:k;$("bd").textContent=sel?BD[sel]:"";say(sel?"Touche ton territoire pour construire":"Mode attaque")});
+document.querySelectorAll("#build [data-t]").forEach(b=>b.onclick=()=>{const m=P[1],k=+b.dataset.t;if(!m||!m.alive||state!=="play"||m.tc[k]>=5)return;const c=techCost(m,k);if(m.gold<c)return say("Or insuffisant");m.gold-=c;m.tc[k]++;say(b.firstChild.textContent+" niveau "+m.tc[k])});
+$("bomb").onclick=()=>{sel=sel===6?0:6;$("bd").textContent=sel?"Bombe : touche une zone ennemie (rayon 3, détruit cases et bâtiments, recharge 30 s).":"";say(sel?"Touche une zone ennemie":"Mode attaque")};
+$("peace").onclick=()=>{const m=P[1];if(!m||!m.alive||state!=="play")return;if(T<peace)return say("La paix est déjà active");if(m.gold<140)return say("Or insuffisant (140)");m.gold-=140;peace=T+1200;say("Paix : les bots t’épargnent pendant 2 minutes")};
+$("start").innerHTML=`<h1 style="margin:0 0 4px;font:700 28px Georgia,serif">Territoria</h1><p style="margin:0 0 10px;color:var(--mut)">Choisis ta difficulté</p><div style="display:flex;gap:6px;justify-content:center;margin-bottom:8px">${DIFF.map((d,i)=>`<button data-d="${i}">${d.n}</button>`).join("")}</div><small id="dd" style="color:var(--mut);display:block;margin-bottom:12px"></small><button id="play" class="on">Jouer</button>`;
+function showD(){setTimeout(()=>{const b=bestT();if(b)$("dd").textContent+=" · record "+Math.floor(b/60)+" min "+b%60+" s"});document.querySelectorAll("#start [data-d]").forEach(b=>b.classList.toggle("on",+b.dataset.d===dif));const d=DIFF[dif];$("dd").textContent=d.bots+" bots · économie des bots ×"+d.eco+" · "+d.tr+" troupes au départ"}
+document.querySelectorAll("#start [data-d]").forEach(b=>b.onclick=()=>{dif=+b.dataset.d;showD()});
+$("play").onclick=()=>{state="pick";$("start").style.display="none";say("Touche une terre libre pour poser ta capitale",6000)};showD();
+$("dip").onclick=()=>{sel=sel===7?0:7;$("bd").textContent=sel?"Alliance : touche un adversaire. Un allié ne t’attaque plus ; l’attaquer rompt l’alliance.":"";say(sel?"Touche un adversaire":"Mode attaque")};
+$("inf").onclick=()=>{sel=sel===8?0:8;$("bd").textContent=sel?"Inspection : touche un territoire pour voir ses troupes et bâtiments.":"";say(sel?"Touche un territoire":"Mode attaque")};
+$("wr").onclick=()=>{war=!war;say(war?"Économie de guerre : +40 % de troupes, −40 % d’or":"Économie normale")};
+addEventListener("keydown",e=>{const k=e.key.toLowerCase();if(k>="1"&&k<="5")document.querySelector(`[data-k="${k}"]`).click();else if(k==="b")$("bomb").click();else if(k==="a")$("dip").click();else if(k==="i")$("inf").click();else if(k==="p")$("pause").click();else if(k==="escape"){sel=0;$("bd").textContent=""}});
+$("tx").oninput=e=>{tax=e.target.value/100;$("txv").textContent=e.target.value+"%"};
+$("rec").onclick=()=>{const m=P&&P[1];if(!m||!m.alive||state!=="play")return;const n=m.pop*.25;m.pop-=n;m.troops+=n*.8;say("+"+Math.floor(n*.8)+" troupes")};
+theme();size();newGame();clock();render();
+</script></body></html>
